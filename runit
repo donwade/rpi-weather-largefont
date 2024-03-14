@@ -1,0 +1,5 @@
+#!/bin/bash
+set -ex
+sudo rm -rf _*
+sudo rm -rf *.pyc
+sudo --preserve-env=OPENWEATHER_APIKEY,NEWS_APIKEY bash -c "python $PWD/weather.py"

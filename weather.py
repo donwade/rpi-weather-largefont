@@ -9,8 +9,8 @@ fontdir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'font')
 
 # Search lib folder for display driver modules
 sys.path.append('lib')
-from waveshare_epd import epd7in5_V2
-epd = epd7in5_V2.EPD()
+from waveshare_epd import epd7in5b_V2
+epd = epd7in5b_V2.EPD()
 
 from datetime import datetime
 import time
@@ -31,7 +31,7 @@ def write_to_screen(image, sleep_seconds):
     # Initialize the drawing context with template as background
     h_image.paste(screen_output_file, (0, 0))
     epd.init()
-    epd.display(epd.getbuffer(h_image))
+    epd.display(epd.getbuffer(h_image), epd.getbuffer(h_image))
     # Sleep
     time.sleep(2)
     epd.sleep()
@@ -71,16 +71,19 @@ black = 'rgb(0,0,0)'
 white = 'rgb(255,255,255)'
 grey = 'rgb(235,235,235)'
 
+API_KEY = str(os.getenv('OPENWEATHER_APIKEY'))
+print (API_KEY)
+
 # Initialize and clear screen
 print('Initializing and clearing screen.')
 epd.init()
 epd.Clear()
 
-API_KEY = '******API KEY*******'
-LOCATION = '*******'
-LATITUDE = '*******'
-LONGITUDE = '*******'
-UNITS = 'imperial'
+LOCATION = 'Ottawa'
+LATITUDE = '45.294518'
+LONGITUDE = '-75.8638965'
+
+UNITS = 'metric'
 CSV_OPTION = True # if csv_option == True, a weather data will be appended to 'record.csv'
 
 BASE_URL = 'http://api.openweathermap.org/data/2.5/onecall?' 

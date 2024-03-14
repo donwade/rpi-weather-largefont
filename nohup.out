@@ -1,0 +1,3 @@
++ sudo rm -rf '_*'
++ sudo rm -rf '*.pyc'
++ sudo --preserve-env=OPENWEATHER_APIKEY,NEWS_APIKEY bash -c 'python /home/dwade/esp-dev/e-paper/rpi-weather-largefont/weather.py'

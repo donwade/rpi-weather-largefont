@@ -35,6 +35,8 @@ from . import epdconfig
 EPD_WIDTH       = 800
 EPD_HEIGHT      = 480
 
+logger = logging.getLogger(__name__)
+
 class EPD:
     def __init__(self):
         self.reset_pin = epdconfig.RST_PIN
@@ -47,11 +49,11 @@ class EPD:
     # Hardware reset
     def reset(self):
         epdconfig.digital_write(self.reset_pin, 1)
-        epdconfig.delay_ms(200) 
+        epdconfig.delay_ms(20) 
         epdconfig.digital_write(self.reset_pin, 0)
         epdconfig.delay_ms(2)
         epdconfig.digital_write(self.reset_pin, 1)
-        epdconfig.delay_ms(200)   
+        epdconfig.delay_ms(20)   
 
     def send_command(self, command):
         epdconfig.digital_write(self.dc_pin, 0)
@@ -64,21 +66,34 @@ class EPD:
         epdconfig.digital_write(self.cs_pin, 0)
         epdconfig.spi_writebyte([data])
         epdconfig.digital_write(self.cs_pin, 1)
-        
+
+    def send_data2(self, data):
+        epdconfig.digital_write(self.dc_pin, 1)
+        epdconfig.digital_write(self.cs_pin, 0)
+        epdconfig.SPI.writebytes2(data)
+        epdconfig.digital_write(self.cs_pin, 1)
+
     def ReadBusy(self):
-        logging.debug("e-Paper busy")
+        logger.debug("e-Paper busy")
         self.send_command(0x71)
         busy = epdconfig.digital_read(self.busy_pin)
         while(busy == 0):
             self.send_command(0x71)
             busy = epdconfig.digital_read(self.busy_pin)
-        epdconfig.delay_ms(200)
+        epdconfig.delay_ms(20)
+        logger.debug("e-Paper busy release")
         
     def init(self):
         if (epdconfig.module_init() != 0):
             return -1
         # EPD hardware init start
         self.reset()
+        
+        self.send_command(0x06)     # btst
+        self.send_data(0x17)
+        self.send_data(0x17)
+        self.send_data(0x28)        # If an exception is displayed, try using 0x38
+        self.send_data(0x17)
         
         self.send_command(0x01)			#POWER SETTING
         self.send_data(0x07)
@@ -111,49 +126,151 @@ class EPD:
 
         # EPD hardware init end
         return 0
+    
+    def init_fast(self):
+        if (epdconfig.module_init() != 0):
+            return -1
+        # EPD hardware init start
+        self.reset()
+        
+        self.send_command(0X00)			#PANNEL SETTING
+        self.send_data(0x1F)   #KW-3f   KWR-2F	BWROTP 0f	BWOTP 1f
+
+        self.send_command(0X50)			#VCOM AND DATA INTERVAL SETTING
+        self.send_data(0x10)
+        self.send_data(0x07)
+
+        self.send_command(0x04) #POWER ON
+        epdconfig.delay_ms(100) 
+        self.ReadBusy()        #waiting for the electronic paper IC to release the idle signal
+
+        #Enhanced display drive(Add 0x06 command)
+        self.send_command(0x06)			#Booster Soft Start 
+        self.send_data (0x27)
+        self.send_data (0x27)   
+        self.send_data (0x18)		
+        self.send_data (0x17)		
+
+        self.send_command(0xE0)
+        self.send_data(0x02)
+        self.send_command(0xE5)
+        self.send_data(0x5A)
+
+        # EPD hardware init end
+        return 0
+    
+    def init_part(self):
+        if (epdconfig.module_init() != 0):
+            return -1
+        # EPD hardware init start
+        self.reset()
+
+        self.send_command(0X00)			#PANNEL SETTING
+        self.send_data(0x1F)   #KW-3f   KWR-2F	BWROTP 0f	BWOTP 1f
+
+        self.send_command(0x04) #POWER ON
+        epdconfig.delay_ms(100) 
+        self.ReadBusy()        #waiting for the electronic paper IC to release the idle signal
+
+        self.send_command(0xE0)
+        self.send_data(0x02)
+        self.send_command(0xE5)
+        self.send_data(0x6E)
+
+        # EPD hardware init end
+        return 0
 
     def getbuffer(self, image):
-        # logging.debug("bufsiz = ",int(self.width/8) * self.height)
-        buf = [0xFF] * (int(self.width/8) * self.height)
-        image_monocolor = image.convert('1')
-        imwidth, imheight = image_monocolor.size
-        pixels = image_monocolor.load()
-        # logging.debug("imwidth = %d, imheight = %d",imwidth,imheight)
+        img = image
+        imwidth, imheight = img.size
         if(imwidth == self.width and imheight == self.height):
-            logging.debug("Vertical")
-            for y in range(imheight):
-                for x in range(imwidth):
-                    # Set the bits for the column of pixels at the current position.
-                    if pixels[x, y] == 0:
-                        buf[int((x + y * self.width) / 8)] &= ~(0x80 >> (x % 8))
+            img = img.convert('1')
         elif(imwidth == self.height and imheight == self.width):
-            logging.debug("Horizontal")
-            for y in range(imheight):
-                for x in range(imwidth):
-                    newx = y
-                    newy = self.height - x - 1
-                    if pixels[x, y] == 0:
-                        buf[int((newx + newy*self.width) / 8)] &= ~(0x80 >> (y % 8))
+            # image has correct dimensions, but needs to be rotated
+            img = img.rotate(90, expand=True).convert('1')
+        else:
+            logger.warning("Wrong image dimensions: must be " + str(self.width) + "x" + str(self.height))
+            # return a blank buffer
+            return [0x00] * (int(self.width/8) * self.height)
+
+        buf = bytearray(img.tobytes('raw'))
+        # The bytes need to be inverted, because in the PIL world 0=black and 1=white, but
+        # in the e-paper world 0=white and 1=black.
+        for i in range(len(buf)):
+            buf[i] ^= 0xFF
         return buf
-        
+
     def display(self, image):
+        if(self.width % 8 == 0):
+            Width = self.width // 8
+        else:
+            Width = self.width // 8 +1
+        Height = self.height
+        image1 = [0xFF] * int(self.width * self.height / 8)
+        for j in range(Height):
+                for i in range(Width):
+                    image1[i + j * Width] = ~image[i + j * Width]
+        self.send_command(0x10)
+        self.send_data2(image1)
+
         self.send_command(0x13)
-        for i in range(0, int(self.width * self.height / 8)):
-            self.send_data(~image[i]);
-                
+        self.send_data2(image)
+
         self.send_command(0x12)
         epdconfig.delay_ms(100)
         self.ReadBusy()
-        
+
     def Clear(self):
         self.send_command(0x10)
-        for i in range(0, int(self.width * self.height / 8)):
-            self.send_data(0x00)
-            
+        self.send_data2([0xFF] * int(self.width * self.height / 8))
         self.send_command(0x13)
-        for i in range(0, int(self.width * self.height / 8)):
-            self.send_data(0x00)
+        self.send_data2([0x00] * int(self.width * self.height / 8))
+
+        self.send_command(0x12)
+        epdconfig.delay_ms(100)
+        self.ReadBusy()
+
+    def display_Partial(self, Image, Xstart, Ystart, Xend, Yend):
+        if((Xstart % 8 + Xend % 8 == 8 & Xstart % 8 > Xend % 8) | Xstart % 8 + Xend % 8 == 0 | (Xend - Xstart)%8 == 0):
+            Xstart = Xstart // 8 * 8
+            Xend = Xend // 8 * 8
+        else:
+            Xstart = Xstart // 8 * 8
+            if Xend % 8 == 0:
+                Xend = Xend // 8 * 8
+            else:
+                Xend = Xend // 8 * 8 + 1
                 
+        Width = (Xend - Xstart) // 8
+        Height = Yend - Ystart
+	
+        self.send_command(0x50)
+        self.send_data(0xA9)
+        self.send_data(0x07)
+
+        self.send_command(0x91)		#This command makes the display enter partial mode
+        self.send_command(0x90)		#resolution setting
+        self.send_data (Xstart//256)
+        self.send_data (Xstart%256)   #x-start    
+
+        self.send_data ((Xend-1)//256)		
+        self.send_data ((Xend-1)%256)  #x-end	
+
+        self.send_data (Ystart//256)  #
+        self.send_data (Ystart%256)   #y-start    
+
+        self.send_data ((Yend-1)//256)		
+        self.send_data ((Yend-1)%256)  #y-end
+        self.send_data (0x01)
+
+        image1 = [0xFF] * int(self.width * self.height / 8)
+        for j in range(Height):
+                for i in range(Width):
+                    image1[i + j * Width] = ~Image[i + j * Width]
+
+        self.send_command(0x13)   #Write Black and White image to RAM
+        self.send_data2(image1)
+
         self.send_command(0x12)
         epdconfig.delay_ms(100)
         self.ReadBusy()
@@ -165,7 +282,6 @@ class EPD:
         self.send_command(0x07) # DEEP_SLEEP
         self.send_data(0XA5)
         
-    def Dev_exit(self):
+        epdconfig.delay_ms(2000)
         epdconfig.module_exit()
 ### END OF FILE ###
-
